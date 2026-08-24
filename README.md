@@ -86,3 +86,13 @@ view parse "/path/to/receipt.png"
 # or
 view -i "./invoice.png" --parse-table
 ```
+
+### 7. Instant Clipboard OCR (`view clip`)
+Extract text immediately from whatever screenshot or image is in your system clipboard:
+```bash
+view clip
+# or
+view --clip
+```
+- Automatically captures clipboard data (`xclip`, `wl-paste`, or `ImageGrab`).
+- Offers one-click copy of extracted text back to the clipboard, continuous AI chat, table parsing, or PDF generation.

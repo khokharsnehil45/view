@@ -138,3 +138,12 @@ view
   - **Generic Tables / Spreadsheets**: Parses Markdown tables into standard CSV rows & columns.
   - **Key-Value Forms**: Extracts form metadata into clean JSON schemas.
 - Exports to: `.csv`, `.json`, or full Markdown (`.md`).
+
+### 9. 📋 Instant Clipboard OCR (`clipboard_handler.py`)
+- Direct command: `view clip` or `view --clip`
+- Compatible across X11 (`xclip`), Wayland (`wl-paste`), and macOS/Windows (`PIL.ImageGrab`).
+- Allows you to take a quick screenshot snippet (e.g. `PrintScreen` or `Flameshot`) and immediately:
+  - Copy extracted OCR text directly to clipboard
+  - Launch live multi-turn AI Chat on the screenshot
+  - Parse tabular/receipt data into CSV/JSON
+  - Save to structured PDF or TXT

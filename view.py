@@ -19,6 +19,7 @@ from pdf_builder import PDFDocumentBuilder
 from navigator import interactive_file_navigator, scan_directory
 from ai_analyst import analyze_extracted_text_session, start_interactive_ai_chat, select_or_pull_model
 from table_parser import interactive_table_parser_session
+from clipboard_handler import get_image_from_clipboard, copy_text_to_clipboard
 from updater import run_update
 
 console = Console()
@@ -40,14 +41,14 @@ def print_banner():
         Align.left(banner_ascii),
         border_style="bright_cyan",
         padding=(1, 2),
-        subtitle="[bold magenta]v1.6.0[/bold magenta] • [bold cyan]Table & Receipt Parser[/bold cyan]",
+        subtitle="[bold magenta]v1.7.0[/bold magenta] • [bold cyan]Clipboard & Table OCR Engine[/bold cyan]",
         subtitle_align="right"
     )
     console.print(banner_panel)
 
 def display_menu_panel():
     menu_desc = "[bold yellow]🛠️  VIEW Interactive Module Selector[/bold yellow]\n" \
-                "[dim]Rapid PP-OCRv4 ONNX, Visual Navigator, Table/Receipt to CSV/JSON, & Ollama AI Chat.[/dim]"
+                "[dim]Clipboard OCR, Rapid PP-OCRv4, Visual Navigator, Table/Receipt to CSV, & Ollama AI Chat.[/dim]"
     console.print(Panel(menu_desc, border_style="yellow", padding=(0, 1)))
 
 def get_image_files(paths: List[str]) -> List[str]:
@@ -161,6 +162,57 @@ def run_ocr_and_export(
 
     return True, extracted_data
 
+def handle_clipboard_ocr(engine_name: str = "rapidocr"):
+    """Extract OCR directly from system clipboard image."""
+    console.print("\n[bold cyan]📋 Reading image from system clipboard...[/bold cyan]")
+    clip_img = get_image_from_clipboard()
+    if not clip_img:
+        console.print(Panel(
+            "[bold red]❌ No image found in clipboard![/bold red]\n\n"
+            "[dim]Tip: Copy an image or take a screenshot with PrintScreen / Flameshot / Snip, then run this option.[/dim]",
+            border_style="red"
+        ))
+        return
+
+    success, data = run_ocr_and_export([clip_img], engine_name=engine_name)
+    if success and data:
+        full_text = data[0]['full_text']
+        
+        # Action selector for clipboard result
+        post_clip = questionary.select(
+            "Clipboard OCR Actions:",
+            choices=[
+                "📋 Copy Extracted Text to Clipboard",
+                "💬 Start Continuous AI Chat with this Screenshot",
+                "📊 Parse as Table / Receipt to CSV/JSON",
+                "📄 Save to Structured PDF",
+                "📝 Save to Text File (.txt)",
+                "⬅️ Return to Main Menu"
+            ]
+        ).ask()
+
+        if "Copy Extracted Text" in post_clip:
+            copy_text_to_clipboard(full_text, label="OCR Text")
+        elif "Start Continuous AI Chat" in post_clip:
+            start_interactive_ai_chat(full_text, "Clipboard Screenshot")
+        elif "Parse as Table" in post_clip:
+            interactive_table_parser_session(full_text, "Clipboard Screenshot")
+        elif "Save to Structured PDF" in post_clip:
+            pdf_name = questionary.text("Output PDF filename:", default="clipboard_document.pdf").ask()
+            if pdf_name:
+                PDFDocumentBuilder(title="Clipboard Snapshot OCR").build_pdf(
+                    extracted_data=data,
+                    output_path=pdf_name,
+                    include_thumbnails=True
+                )
+                console.print(f"[bold green]✔ Saved PDF to: [cyan]{pdf_name}[/cyan][/bold green]")
+        elif "Save to Text File" in post_clip:
+            txt_name = questionary.text("Output TXT filename:", default="clipboard_text.txt").ask()
+            if txt_name:
+                with open(txt_name, 'w', encoding='utf-8') as f:
+                    f.write(full_text)
+                console.print(f"[bold green]✔ Saved TXT to: [cyan]{txt_name}[/cyan][/bold green]")
+
 def run_interactive_mode():
     last_extracted_text = ""
     last_source_label = ""
@@ -173,6 +225,7 @@ def run_interactive_mode():
             display_menu_panel()
 
             choices = [
+                "📋 Instant Clipboard OCR (Extract text from Copied Screenshot)",
                 "📂 Browse Files & Extract OCR (Visual Navigator & PDF/TXT)",
                 "📊 Table & Receipt Parser (Extract to CSV / JSON / Markdown)",
                 "💬 VIEW AI Chat (Continuous Interactive Chat with Document)",
@@ -196,6 +249,11 @@ def run_interactive_mode():
                 console.print("\n[yellow]Thank you for using VIEW! Goodbye! 👋[/yellow]\n")
                 sys.exit(0)
 
+            if "Instant Clipboard OCR" in action:
+                handle_clipboard_ocr(engine_name=default_engine)
+                questionary.press_any_key_to_continue("Press any key to return to main menu...").ask()
+                continue
+
             if "Check for Updates" in action:
                 run_update()
                 questionary.press_any_key_to_continue("Press any key to return to main menu...").ask()
@@ -206,6 +264,7 @@ def run_interactive_mode():
                 if last_extracted_text:
                     ai_sources.append(f"📄 Parse Previous OCR Text ({last_source_label})")
                 ai_sources.extend([
+                    "📋 Extract from Clipboard Screenshot",
                     "🖼️  Select Images to OCR & Parse (Visual Navigator)",
                     "📁 Choose Existing TXT / Markdown File",
                     "✍️  Paste Raw Text Manually",
@@ -216,7 +275,15 @@ def run_interactive_mode():
                 if not ai_src or "Back to Main Menu" in ai_src:
                     continue
 
-                if "Previous OCR" in ai_src:
+                if "Clipboard Screenshot" in ai_src:
+                    clip_img = get_image_from_clipboard()
+                    if clip_img:
+                        success, data = run_ocr_and_export([clip_img], engine_name=default_engine)
+                        if success and data:
+                            interactive_table_parser_session(data[0]['full_text'], "Clipboard Screenshot")
+                    else:
+                        console.print("[red]❌ No image found in clipboard![/red]")
+                elif "Previous OCR" in ai_src:
                     interactive_table_parser_session(last_extracted_text, last_source_label)
                 elif "Select Images" in ai_src:
                     imgs = interactive_file_navigator()
@@ -267,6 +334,7 @@ def run_interactive_mode():
                 if last_extracted_text:
                     ai_sources.append(f"📄 Chat about Previous OCR Text ({last_source_label})")
                 ai_sources.extend([
+                    "📋 Chat with Clipboard Screenshot",
                     "🖼️  Select Images to OCR & Chat (Visual Navigator)",
                     "📁 Choose Existing TXT / Markdown File",
                     "✍️  Paste Raw Text Manually",
@@ -277,7 +345,15 @@ def run_interactive_mode():
                 if not ai_src or "Back to Main Menu" in ai_src:
                     continue
 
-                if "Previous OCR" in ai_src:
+                if "Clipboard Screenshot" in ai_src:
+                    clip_img = get_image_from_clipboard()
+                    if clip_img:
+                        success, data = run_ocr_and_export([clip_img], engine_name=default_engine)
+                        if success and data:
+                            start_interactive_ai_chat(data[0]['full_text'], "Clipboard Screenshot")
+                    else:
+                        console.print("[red]❌ No image found in clipboard![/red]")
+                elif "Previous OCR" in ai_src:
                     start_interactive_ai_chat(last_extracted_text, last_source_label)
                 elif "Select Images" in ai_src:
                     imgs = interactive_file_navigator()
@@ -307,6 +383,7 @@ def run_interactive_mode():
                 if last_extracted_text:
                     ai_sources.append(f"📄 Use Previously Extracted Text ({last_source_label})")
                 ai_sources.extend([
+                    "📋 Analyze Clipboard Screenshot",
                     "🖼️  Select Images to OCR & Analyze (Visual Navigator)",
                     "📁 Choose Existing TXT / Markdown File",
                     "✍️  Paste Raw Text Manually",
@@ -317,7 +394,15 @@ def run_interactive_mode():
                 if not ai_src or "Back to Main Menu" in ai_src:
                     continue
 
-                if "Previously Extracted" in ai_src:
+                if "Clipboard Screenshot" in ai_src:
+                    clip_img = get_image_from_clipboard()
+                    if clip_img:
+                        success, data = run_ocr_and_export([clip_img], engine_name=default_engine)
+                        if success and data:
+                            analyze_extracted_text_session(data[0]['full_text'], "Clipboard Screenshot")
+                    else:
+                        console.print("[red]❌ No image found in clipboard![/red]")
+                elif "Previously Extracted" in ai_src:
                     analyze_extracted_text_session(last_extracted_text, last_source_label)
                 elif "Select Images" in ai_src:
                     imgs = interactive_file_navigator()
@@ -456,6 +541,7 @@ def run_interactive_mode():
                 post_action = questionary.select(
                     "Next Action with Extracted Text:",
                     choices=[
+                        "📋 Copy Extracted Text to Clipboard",
                         "📊 Parse Tables / Receipts to CSV & JSON",
                         "💬 Launch Continuous VIEW AI Chat with this document",
                         "🧠 Run AI Document Analysis (Summary, Tables, Cleaning)",
@@ -463,7 +549,9 @@ def run_interactive_mode():
                     ]
                 ).ask()
 
-                if "Parse Tables" in post_action:
+                if "Copy Extracted Text" in post_action:
+                    copy_text_to_clipboard(last_extracted_text, label="Extracted OCR Text")
+                elif "Parse Tables" in post_action:
                     interactive_table_parser_session(last_extracted_text, last_source_label)
                 elif "VIEW AI Chat" in post_action:
                     start_interactive_ai_chat(last_extracted_text, last_source_label)
@@ -484,18 +572,24 @@ def run_interactive_mode():
 @click.option('-t', '--title', default="Structured OCR Document", help="Document title for the PDF header")
 @click.option('--no-thumbnails', is_flag=True, help="Do not include thumbnail images in the generated PDF")
 @click.option('--engine', type=click.Choice(['rapidocr', 'easyocr', 'tesseract'], case_sensitive=False), default='rapidocr', help="OCR engine: rapidocr (PP-OCRv4 ONNX), easyocr, tesseract")
+@click.option('--clip', is_flag=True, help="Extract OCR directly from image in system clipboard")
+@click.option('--copy', 'copy_clip', is_flag=True, help="Copy extracted text directly to clipboard")
 @click.option('--analyze', is_flag=True, help="Launch local AI analyst (Ollama) on extracted text after OCR")
 @click.option('--chat', is_flag=True, help="Launch interactive multi-turn AI Chat session with document context")
 @click.option('--parse-table', is_flag=True, help="Launch table & receipt extraction session")
 @click.option('--interactive', '-m', is_flag=True, help="Launch interactive TUI menu & file navigator")
 @click.pass_context
-def cli(ctx, inputs, output, txt, csv_out, json_out, title, no_thumbnails, engine, analyze, chat, parse_table, interactive):
+def cli(ctx, inputs, output, txt, csv_out, json_out, title, no_thumbnails, engine, clip, copy_clip, analyze, chat, parse_table, interactive):
     """
     \b
     VIEW - High-Precision Document OCR & PDF Structuring Engine
-    Extract text from multiple images, extract tables/receipts to CSV/JSON, chat with local LLMs, and compile PDFs.
+    Extract text from multiple images, clipboard screenshots, tables to CSV/JSON, chat with local LLMs, and compile PDFs.
     """
     if ctx.invoked_subcommand is not None:
+        return
+
+    if clip:
+        handle_clipboard_ocr(engine_name=engine)
         return
 
     if interactive or (not inputs and len(sys.argv) == 1):
@@ -505,7 +599,7 @@ def cli(ctx, inputs, output, txt, csv_out, json_out, title, no_thumbnails, engin
     print_banner()
     
     if not inputs:
-        console.print("[bold red]❌ Error: No input images provided.[/bold red] Use [bold yellow]-i <path>[/bold yellow] or run [bold yellow]view --interactive[/bold yellow]\n")
+        console.print("[bold red]❌ Error: No input images provided.[/bold red] Use [bold yellow]-i <path>[/bold yellow] or run [bold yellow]view --clip[/bold yellow] / [bold yellow]view --interactive[/bold yellow]\n")
         sys.exit(1)
 
     images = get_image_files(list(inputs))
@@ -513,7 +607,7 @@ def cli(ctx, inputs, output, txt, csv_out, json_out, title, no_thumbnails, engin
         console.print(f"[bold red]❌ Error: No valid image files found matching:[/bold red] {inputs}")
         sys.exit(1)
 
-    if not output and not txt and not analyze and not chat and not parse_table and not csv_out and not json_out:
+    if not output and not txt and not analyze and not chat and not parse_table and not csv_out and not json_out and not copy_clip:
         output = "output.pdf"
 
     success, data = run_ocr_and_export(
@@ -527,13 +621,15 @@ def cli(ctx, inputs, output, txt, csv_out, json_out, title, no_thumbnails, engin
     if not success:
         sys.exit(1)
 
-    if (analyze or chat or parse_table or csv_out or json_out) and data:
+    if data:
         combined = "\n\n".join([f"=== {os.path.basename(d['image_path'])} ===\n" + d['full_text'] for d in data])
+        if copy_clip:
+            copy_text_to_clipboard(combined, label="Extracted OCR Text")
         if chat:
             start_interactive_ai_chat(combined, f"{len(data)} image(s)")
         elif parse_table or csv_out or json_out:
             interactive_table_parser_session(combined, f"{len(data)} image(s)")
-        else:
+        elif analyze:
             analyze_extracted_text_session(combined, f"{len(data)} image(s)")
 
 @cli.command(name="update")
@@ -541,6 +637,12 @@ def update_cmd():
     """Check for updates and pull the latest version from GitHub."""
     print_banner()
     run_update()
+
+@cli.command(name="clip")
+def clip_cmd():
+    """Extract OCR directly from the image stored in your system clipboard."""
+    print_banner()
+    handle_clipboard_ocr(engine_name="rapidocr")
 
 @cli.command(name="chat")
 @click.argument('image_path')
