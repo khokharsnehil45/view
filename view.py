@@ -18,6 +18,7 @@ from ocr_engine import OCREngine
 from pdf_builder import PDFDocumentBuilder
 from navigator import interactive_file_navigator, scan_directory
 from ai_analyst import analyze_extracted_text_session, select_or_pull_model
+from updater import run_update
 
 console = Console()
 
@@ -38,7 +39,7 @@ def print_banner():
         Align.left(banner_ascii),
         border_style="bright_cyan",
         padding=(1, 2),
-        subtitle="[bold magenta]v1.2.0[/bold magenta] • [bold cyan]All-in-One CLI Suite[/bold cyan]",
+        subtitle="[bold magenta]v1.3.0[/bold magenta] • [bold cyan]All-in-One CLI Suite[/bold cyan]",
         subtitle_align="right"
     )
     console.print(banner_panel)
@@ -175,6 +176,7 @@ def run_interactive_mode():
                 "🧠 Local AI Document Analyst (Analyze text via Ollama)",
                 "🖼️  Inspect Directory & List Images",
                 "⚙️  Configure OCR Engine & Preferences",
+                "🔄 Check for Updates (Auto-Updater)",
                 "------------------------------------",
                 "💡 Quick Demo with Screenshot",
                 "🚪 Exit VIEW"
@@ -190,10 +192,14 @@ def run_interactive_mode():
                 console.print("\n[yellow]Thank you for using VIEW! Goodbye! 👋[/yellow]\n")
                 sys.exit(0)
 
+            if "Check for Updates" in action:
+                run_update()
+                questionary.press_any_key_to_continue("Press any key to return to main menu...").ask()
+                continue
+
             selected_images = []
 
             if "Local AI Document Analyst" in action:
-                # Option to analyze last extraction, enter text, or pick image(s) to OCR first
                 ai_sources = []
                 if last_extracted_text:
                     ai_sources.append(f"📄 Use Previously Extracted Text ({last_source_label})")
@@ -353,7 +359,6 @@ def run_interactive_mode():
                 last_extracted_text = combined
                 last_source_label = f"{len(data)} image(s)"
 
-                # Proactively ask if user wants to run local AI analysis
                 ask_ai = questionary.confirm("🤖 Would you like to analyze this extracted text with Local AI (Ollama)?", default=False).ask()
                 if ask_ai:
                     analyze_extracted_text_session(last_extracted_text, last_source_label)
@@ -363,7 +368,7 @@ def run_interactive_mode():
             console.print("\n[yellow]Interrupted by user. Exiting VIEW...[/yellow]")
             sys.exit(0)
 
-@click.command(context_settings=dict(help_option_names=['-h', '--help']))
+@click.group(invoke_without_command=True, context_settings=dict(help_option_names=['-h', '--help']))
 @click.option('-i', '--input', 'inputs', multiple=True, help="Input image file(s), folders, or wildcards")
 @click.option('-o', '--output', default=None, help="Output PDF filepath (e.g. output.pdf)")
 @click.option('--txt', default=None, help="Output TXT filepath (e.g. output.txt)")
@@ -371,14 +376,17 @@ def run_interactive_mode():
 @click.option('--no-thumbnails', is_flag=True, help="Do not include thumbnail images in the generated PDF")
 @click.option('--engine', type=click.Choice(['easyocr', 'tesseract'], case_sensitive=False), default='easyocr', help="OCR engine preference")
 @click.option('--analyze', is_flag=True, help="Launch local AI analyst (Ollama) on extracted text after OCR")
-@click.option('--model', default=None, help="Specific Ollama model name for AI analysis (e.g. llama3.2:3b)")
 @click.option('--interactive', '-m', is_flag=True, help="Launch interactive TUI menu & file navigator")
-def cli(inputs, output, txt, title, no_thumbnails, engine, analyze, model, interactive):
+@click.pass_context
+def cli(ctx, inputs, output, txt, title, no_thumbnails, engine, analyze, interactive):
     """
     \b
     VIEW - High-Precision Document OCR & PDF Structuring Engine
     Extract text from multiple images, analyze with local LLMs (Ollama), and compile into structured PDFs.
     """
+    if ctx.invoked_subcommand is not None:
+        return
+
     if interactive or (not inputs and len(sys.argv) == 1):
         run_interactive_mode()
         return
@@ -411,6 +419,12 @@ def cli(inputs, output, txt, title, no_thumbnails, engine, analyze, model, inter
     if analyze and data:
         combined = "\n\n".join([f"=== {os.path.basename(d['image_path'])} ===\n" + d['full_text'] for d in data])
         analyze_extracted_text_session(combined, f"{len(data)} image(s)")
+
+@cli.command(name="update")
+def update_cmd():
+    """Check for updates and pull the latest version from GitHub."""
+    print_banner()
+    run_update()
 
 if __name__ == '__main__':
     cli()

@@ -58,3 +58,10 @@ view -i "~/Pictures/Screenshots/" --txt extracted_notes.txt
 - [`ocr_engine.py`](file:///home/kevin/view/ocr_engine.py): Multi-engine OCR extraction with spatial sorting and block grouping.
 - [`pdf_builder.py`](file:///home/kevin/view/pdf_builder.py): ReportLab PDF document builder with numbered canvas, styles, and headers.
 - [`setup.sh`](file:///home/kevin/view/setup.sh): Helper script to symlink/wrap `view` command in `~/.local/bin`.
+
+### 4. Self-Updating
+Keep VIEW updated to the latest GitHub release:
+```bash
+view update
+```
+Or select **`🔄 Check for Updates (Auto-Updater)`** from the interactive menu.
