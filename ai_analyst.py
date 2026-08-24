@@ -3,12 +3,12 @@ import os
 import subprocess
 import urllib.request
 import urllib.error
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Generator
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.live import Live
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
 import questionary
@@ -123,13 +123,13 @@ def select_or_pull_model() -> Optional[str]:
 
     return selected
 
-def query_ollama_chat(model: str, messages: List[Dict[str, str]]) -> Optional[str]:
-    """Send conversation messages to local Ollama chat API."""
+def stream_ollama_chat(model: str, messages: List[Dict[str, str]]) -> Generator[str, None, None]:
+    """Stream token chunks from local Ollama chat API."""
     url = f"{OLLAMA_API_BASE}/api/chat"
     payload = {
         "model": model,
         "messages": messages,
-        "stream": False
+        "stream": True
     }
     
     try:
@@ -141,18 +141,50 @@ def query_ollama_chat(model: str, messages: List[Dict[str, str]]) -> Optional[st
             method='POST'
         )
         with urllib.request.urlopen(req, timeout=180) as resp:
-            res_json = json.loads(resp.read().decode('utf-8'))
-            msg = res_json.get("message", {})
-            return msg.get("content", "")
+            for line in resp:
+                if line:
+                    try:
+                        chunk = json.loads(line.decode('utf-8'))
+                        content = chunk.get("message", {}).get("content", "")
+                        if content:
+                            yield content
+                    except json.JSONDecodeError:
+                        continue
     except urllib.error.URLError as e:
         console.print(f"[bold red]❌ Failed to connect to Ollama ({e}). Make sure Ollama is running.[/bold red]")
-        return None
+        return
     except Exception as e:
-        console.print(f"[bold red]❌ Error during Ollama chat: {e}[/bold red]")
-        return None
+        console.print(f"[bold red]❌ Error during Ollama streaming: {e}[/bold red]")
+        return
+
+def render_streaming_response(model: str, messages: List[Dict[str, str]], title: str = "VIEW AI") -> str:
+    """Renders token-by-token live markdown response inside a rich Panel."""
+    full_response = []
+    
+    with Live(
+        Panel(
+            "[dim italic]Thinking and generating tokens...[/dim italic]",
+            title=f"[bold cyan]🤖 {title} ({model})[/bold cyan]",
+            border_style="bright_cyan",
+            padding=(1, 2)
+        ),
+        console=console,
+        refresh_per_second=15
+    ) as live:
+        for chunk in stream_ollama_chat(model=model, messages=messages):
+            full_response.append(chunk)
+            current_text = "".join(full_response)
+            live.update(Panel(
+                Markdown(current_text),
+                title=f"[bold cyan]🤖 {title} ({model})[/bold cyan]",
+                border_style="bright_cyan",
+                padding=(1, 2)
+            ))
+            
+    return "".join(full_response)
 
 def start_interactive_ai_chat(extracted_text: str, source_name: str = "Extracted Document", model: Optional[str] = None):
-    """Continuous multi-turn conversational REPL with the extracted document."""
+    """Continuous multi-turn conversational REPL with real-time streaming tokens."""
     if not model:
         model = select_or_pull_model()
         if not model:
@@ -160,7 +192,7 @@ def start_interactive_ai_chat(extracted_text: str, source_name: str = "Extracted
 
     console.print(Panel(
         f"[bold cyan]Document Context:[/bold cyan] [yellow]{source_name}[/yellow] ([green]{len(extracted_text)} chars[/green])\n"
-        f"[bold cyan]Model:[/bold cyan] [magenta]{model}[/magenta]\n\n"
+        f"[bold cyan]Model:[/bold cyan] [magenta]{model}[/magenta] • [bold green]⚡ Live Token Streaming Enabled[/bold green]\n\n"
         "[dim]Commands: Type your question, or enter [bold yellow]/save[/bold yellow] (export chat), [bold yellow]/clear[/bold yellow] (reset chat), or [bold red]/exit[/bold red] (quit chat).[/dim]",
         title="[bold magenta]💬 VIEW AI Document Chat (Interactive REPL)[/bold magenta]",
         border_style="magenta"
@@ -168,7 +200,7 @@ def start_interactive_ai_chat(extracted_text: str, source_name: str = "Extracted
 
     system_content = (
         "You are an expert AI Document Intelligence assistant. You are conversing with the user about a document "
-        "whose text was extracted via OCR. Answer questions accurately based on this document context.\n\n"
+        "whose text was extracted via OCR. Answer questions accurately and concisely based on this document context.\n\n"
         f"--- START OF DOCUMENT CONTEXT ({source_name}) ---\n"
         f"{extracted_text}\n"
         "--- END OF DOCUMENT CONTEXT ---"
@@ -209,26 +241,13 @@ def start_interactive_ai_chat(extracted_text: str, source_name: str = "Extracted
                 continue
 
             messages.append({"role": "user", "content": user_input})
+            console.print()
 
-            with Progress(
-                SpinnerColumn(style="bold magenta"),
-                TextColumn(f"[bold cyan]Thinking ({model})..."),
-                console=console
-            ) as progress:
-                t = progress.add_task("chat", total=None)
-                assistant_reply = query_ollama_chat(model=model, messages=messages)
+            assistant_reply = render_streaming_response(model=model, messages=messages, title=f"VIEW AI")
 
             if assistant_reply:
                 messages.append({"role": "assistant", "content": assistant_reply})
-                console.print()
-                console.print(Panel(
-                    Markdown(assistant_reply),
-                    title=f"[bold cyan]🤖 VIEW AI ({model})[/bold cyan]",
-                    border_style="bright_cyan",
-                    padding=(1, 2)
-                ))
             else:
-                # Remove unanswered question from history
                 messages.pop()
 
         except KeyboardInterrupt:
@@ -238,7 +257,7 @@ def start_interactive_ai_chat(extracted_text: str, source_name: str = "Extracted
             break
 
 def analyze_extracted_text_session(extracted_text: str, source_name: str = "Extracted Document"):
-    """Interactive AI Analyst session for extracted OCR text."""
+    """Interactive AI Analyst session for extracted OCR text with live streaming."""
     if not extracted_text.strip():
         console.print("[bold red]❌ No text available to analyze![/bold red]")
         return
@@ -254,7 +273,7 @@ def analyze_extracted_text_session(extracted_text: str, source_name: str = "Extr
     if not model:
         return
 
-    console.print(f"\n[bold green]✔ Active Model: [bold cyan]{model}[/bold cyan][/bold green]\n")
+    console.print(f"\n[bold green]✔ Active Model: [bold cyan]{model}[/bold cyan] • [bold green]⚡ Streaming Active[/bold green][/bold green]\n")
 
     while True:
         task_choices = [
@@ -316,23 +335,10 @@ def analyze_extracted_text_session(extracted_text: str, source_name: str = "Extr
                 {"role": "user", "content": user_prompt}
             ]
 
-            with Progress(
-                SpinnerColumn(style="bold magenta"),
-                TextColumn(f"[bold cyan]Analyzing with {model}..."),
-                console=console
-            ) as progress:
-                t = progress.add_task("analyst", total=None)
-                response = query_ollama_chat(model=model, messages=messages)
+            console.print()
+            response = render_streaming_response(model=model, messages=messages, title=f"AI Analysis: {task_title}")
 
             if response:
-                console.print()
-                console.print(Panel(
-                    Markdown(response),
-                    title=f"[bold green]✨ AI Analysis: {task_title} ({model})[/bold green]",
-                    border_style="cyan",
-                    padding=(1, 2)
-                ))
-
                 save_opt = questionary.confirm("Save this AI analysis to a file?", default=False).ask()
                 if save_opt:
                     filename = questionary.text("Enter filename:", default=f"analysis_{task_title.replace(' ', '_').lower()}.md").ask()
