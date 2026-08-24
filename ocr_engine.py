@@ -6,20 +6,65 @@ class OCREngine:
     def __init__(self, languages: List[str] = None, use_gpu: bool = False):
         self.languages = languages or ['en']
         self.use_gpu = use_gpu
+        self._rapidocr_engine = None
         self._easyocr_reader = None
 
+    def _get_rapidocr_engine(self):
+        """Ultra-fast, lightweight CPU ONNX engine based on PP-OCRv4."""
+        if self._rapidocr_engine is None:
+            from rapidocr_onnxruntime import RapidOCR
+            self._rapidocr_engine = RapidOCR()
+        return self._rapidocr_engine
+
     def _get_easyocr_reader(self):
+        """Deep learning PyTorch EasyOCR fallback."""
         if self._easyocr_reader is None:
             import easyocr
             self._easyocr_reader = easyocr.Reader(self.languages, gpu=self.use_gpu)
         return self._easyocr_reader
 
+    def extract_text_rapidocr(self, image_path: str) -> Dict[str, Any]:
+        engine = self._get_rapidocr_engine()
+        result, elapse = engine(image_path)
+        
+        if not result:
+            return {
+                "engine": "RapidOCR (PP-OCRv4 CPU)",
+                "full_text": "",
+                "lines": [],
+                "image_path": image_path
+            }
+
+        # Sort items vertically (top-to-bottom), then horizontally
+        # bbox format: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+        sorted_results = sorted(result, key=lambda x: (x[0][0][1], x[0][0][0]))
+        
+        lines = []
+        full_text_parts = []
+        
+        for bbox, text, prob in sorted_results:
+            text = str(text).strip()
+            if not text:
+                continue
+            full_text_parts.append(text)
+            lines.append({
+                "text": text,
+                "confidence": float(prob) if prob else 0.9,
+                "bbox": bbox
+            })
+            
+        full_text = "\n".join(full_text_parts)
+        
+        return {
+            "engine": "RapidOCR (PP-OCRv4 CPU)",
+            "full_text": full_text,
+            "lines": lines,
+            "image_path": image_path
+        }
+
     def extract_text_easyocr(self, image_path: str) -> Dict[str, Any]:
         reader = self._get_easyocr_reader()
-        # detail=1 returns list of (bbox, text, prob)
         results = reader.readtext(image_path)
-        
-        # Sort items vertically (top to bottom), then horizontally
         sorted_results = sorted(results, key=lambda x: (x[0][0][1], x[0][0][0]))
         
         lines = []
@@ -37,7 +82,6 @@ class OCREngine:
             })
             
         full_text = "\n".join(full_text_parts)
-        
         return {
             "engine": "EasyOCR",
             "full_text": full_text,
@@ -86,17 +130,25 @@ class OCREngine:
             "image_path": image_path
         }
 
-    def extract(self, image_path: str, prefer: str = "easyocr") -> Dict[str, Any]:
+    def extract(self, image_path: str, prefer: str = "rapidocr") -> Dict[str, Any]:
         if not os.path.exists(image_path):
             raise FileNotFoundError(f"Image not found: {image_path}")
             
-        if prefer.lower() == "tesseract":
+        pref = prefer.lower()
+        if pref in ("rapidocr", "ppocr", "paddleocr", "default"):
+            try:
+                return self.extract_text_rapidocr(image_path)
+            except Exception:
+                return self.extract_text_easyocr(image_path)
+        elif pref == "easyocr":
+            try:
+                return self.extract_text_easyocr(image_path)
+            except Exception:
+                return self.extract_text_rapidocr(image_path)
+        elif pref == "tesseract":
             try:
                 return self.extract_text_tesseract(image_path)
             except Exception:
-                return self.extract_text_easyocr(image_path)
+                return self.extract_text_rapidocr(image_path)
         else:
-            try:
-                return self.extract_text_easyocr(image_path)
-            except Exception:
-                return self.extract_text_tesseract(image_path)
+            return self.extract_text_rapidocr(image_path)

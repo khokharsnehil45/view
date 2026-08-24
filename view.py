@@ -39,14 +39,14 @@ def print_banner():
         Align.left(banner_ascii),
         border_style="bright_cyan",
         padding=(1, 2),
-        subtitle="[bold magenta]v1.4.0[/bold magenta] • [bold cyan]All-in-One CLI Suite[/bold cyan]",
+        subtitle="[bold magenta]v1.5.0[/bold magenta] • [bold cyan]Rapid PP-OCRv4 CPU Engine[/bold cyan]",
         subtitle_align="right"
     )
     console.print(banner_panel)
 
 def display_menu_panel():
     menu_desc = "[bold yellow]🛠️  VIEW Interactive Module Selector[/bold yellow]\n" \
-                "[dim]Browse filesystem visually, extract batch OCR, chat with documents via local Ollama LLM, and build PDFs.[/dim]"
+                "[dim]Ultra-fast CPU OCR (PP-OCRv4 ONNX), interactive file navigator, and local Ollama AI chat.[/dim]"
     console.print(Panel(menu_desc, border_style="yellow", padding=(0, 1)))
 
 def get_image_files(paths: List[str]) -> List[str]:
@@ -72,7 +72,7 @@ def run_ocr_and_export(
     output_txt: Optional[str] = None,
     title: str = "Extracted OCR Document",
     include_thumbnails: bool = True,
-    engine_name: str = "easyocr"
+    engine_name: str = "rapidocr"
 ) -> Tuple[bool, List[Dict[str, Any]]]:
     valid_images = [img for img in image_paths if os.path.isfile(img)]
     
@@ -142,7 +142,7 @@ def run_ocr_and_export(
         combined_text = []
         for d in extracted_data:
             combined_text.append(f"==================================================")
-            combined_text.append(f"SOURCE: {os.path.basename(d['image_path'])}")
+            combined_text.append(f"SOURCE: {os.path.basename(d['image_path'])} (Engine: {d.get('engine', 'OCR')})")
             combined_text.append(f"==================================================")
             combined_text.append(d['full_text'])
             combined_text.append("\n")
@@ -154,7 +154,7 @@ def run_ocr_and_export(
         preview = item['full_text'][:350] + "..." if len(item['full_text']) > 350 else item['full_text']
         console.print(Panel(
             preview if preview.strip() else "[dim italic]No text detected[/dim italic]",
-            title=f"[bold green]🔍 OCR Result: {os.path.basename(item['image_path'])}[/bold green]",
+            title=f"[bold green]🔍 {item.get('engine', 'OCR')} Result: {os.path.basename(item['image_path'])}[/bold green]",
             border_style="cyan"
         ))
 
@@ -163,6 +163,7 @@ def run_ocr_and_export(
 def run_interactive_mode():
     last_extracted_text = ""
     last_source_label = ""
+    default_engine = "rapidocr"
 
     while True:
         try:
@@ -173,10 +174,10 @@ def run_interactive_mode():
             choices = [
                 "📂 Browse Files & Extract OCR (Visual Navigator & PDF/TXT)",
                 "💬 VIEW AI Chat (Continuous Interactive Chat with Document)",
-                "🧠 Local AI Document Analyst (Summary, Takeaways & Structuring)",
+                "🧠 Local AI Document Analyst (Summary, Tables, Cleaning)",
                 "⚡ Batch OCR Whole Folder / Directory",
                 "🖼️  Inspect Directory & List Images",
-                "⚙️  Configure OCR Engine & Preferences",
+                f"⚙️  Configure OCR Engine (Current: {default_engine.upper()})",
                 "🔄 Check for Updates (Auto-Updater)",
                 "------------------------------------",
                 "💡 Quick Demo with Screenshot",
@@ -195,6 +196,27 @@ def run_interactive_mode():
 
             if "Check for Updates" in action:
                 run_update()
+                questionary.press_any_key_to_continue("Press any key to return to main menu...").ask()
+                continue
+
+            if "Configure OCR Engine" in action:
+                cfg_choice = questionary.select(
+                    "Select Default OCR Engine:",
+                    choices=[
+                        "🚀 RapidOCR ONNX (PP-OCRv4 - Ultra-Fast CPU, High Accuracy)",
+                        "🐢 EasyOCR (PyTorch Deep Learning Neural Net)",
+                        "⚡ Tesseract OCR (Classical Fast)",
+                        "⬅️ Back"
+                    ]
+                ).ask()
+                if "RapidOCR" in cfg_choice:
+                    default_engine = "rapidocr"
+                elif "EasyOCR" in cfg_choice:
+                    default_engine = "easyocr"
+                elif "Tesseract" in cfg_choice:
+                    default_engine = "tesseract"
+                
+                console.print(f"[bold green]✔ Default engine switched to: {default_engine.upper()}[/bold green]")
                 questionary.press_any_key_to_continue("Press any key to return to main menu...").ask()
                 continue
 
@@ -218,7 +240,7 @@ def run_interactive_mode():
                 elif "Select Images" in ai_src:
                     imgs = interactive_file_navigator()
                     if imgs:
-                        success, data = run_ocr_and_export(imgs)
+                        success, data = run_ocr_and_export(imgs, engine_name=default_engine)
                         if success and data:
                             combined = "\n\n".join([f"=== {os.path.basename(d['image_path'])} ===\n" + d['full_text'] for d in data])
                             last_extracted_text = combined
@@ -258,7 +280,7 @@ def run_interactive_mode():
                 elif "Select Images" in ai_src:
                     imgs = interactive_file_navigator()
                     if imgs:
-                        success, data = run_ocr_and_export(imgs)
+                        success, data = run_ocr_and_export(imgs, engine_name=default_engine)
                         if success and data:
                             combined = "\n\n".join([f"=== {os.path.basename(d['image_path'])} ===\n" + d['full_text'] for d in data])
                             last_extracted_text = combined
@@ -329,20 +351,10 @@ def run_interactive_mode():
                 questionary.press_any_key_to_continue("Press any key to return to main menu...").ask()
                 continue
 
-            elif "Configure OCR Engine" in action:
-                cfg_choice = questionary.select(
-                    "Select Default Engine:",
-                    choices=["EasyOCR (Default - GPU/CPU Neural Net)", "Tesseract OCR (Fast Local)", "⬅️ Back"]
-                ).ask()
-                if cfg_choice and "Back" not in cfg_choice:
-                    console.print(f"[bold green]✔ Engine set to: {cfg_choice}[/bold green]")
-                questionary.press_any_key_to_continue("Press any key to return to main menu...").ask()
-                continue
-
             elif "Quick Demo" in action:
                 demo_img = "/home/kevin/Pictures/Screenshots/Screenshot From 2026-08-24 15-24-57.png"
                 if os.path.exists(demo_img):
-                    success, data = run_ocr_and_export([demo_img], output_pdf="view_demo.pdf", title="VIEW Demo OCR")
+                    success, data = run_ocr_and_export([demo_img], output_pdf="view_demo.pdf", title="VIEW Demo OCR", engine_name=default_engine)
                     if success and data:
                         last_extracted_text = data[0]['full_text']
                         last_source_label = os.path.basename(demo_img)
@@ -390,7 +402,8 @@ def run_interactive_mode():
                 output_pdf=pdf_out,
                 output_txt=txt_out,
                 title=doc_title,
-                include_thumbnails=inc_thumb
+                include_thumbnails=inc_thumb,
+                engine_name=default_engine
             )
 
             if success and data:
@@ -398,7 +411,6 @@ def run_interactive_mode():
                 last_extracted_text = combined
                 last_source_label = f"{len(data)} image(s)"
 
-                # Direct prompt to chat or analyze with AI
                 post_action = questionary.select(
                     "Next Action with Extracted Text:",
                     choices=[
@@ -424,7 +436,7 @@ def run_interactive_mode():
 @click.option('--txt', default=None, help="Output TXT filepath (e.g. output.txt)")
 @click.option('-t', '--title', default="Structured OCR Document", help="Document title for the PDF header")
 @click.option('--no-thumbnails', is_flag=True, help="Do not include thumbnail images in the generated PDF")
-@click.option('--engine', type=click.Choice(['easyocr', 'tesseract'], case_sensitive=False), default='easyocr', help="OCR engine preference")
+@click.option('--engine', type=click.Choice(['rapidocr', 'easyocr', 'tesseract'], case_sensitive=False), default='rapidocr', help="OCR engine: rapidocr (PP-OCRv4 ONNX), easyocr, tesseract")
 @click.option('--analyze', is_flag=True, help="Launch local AI analyst (Ollama) on extracted text after OCR")
 @click.option('--chat', is_flag=True, help="Launch interactive multi-turn AI Chat session with document context")
 @click.option('--interactive', '-m', is_flag=True, help="Launch interactive TUI menu & file navigator")
@@ -489,7 +501,7 @@ def chat_cmd(image_path):
     if not imgs:
         console.print(f"[bold red]❌ Image not found:[/bold red] {image_path}")
         return
-    success, data = run_ocr_and_export(imgs)
+    success, data = run_ocr_and_export(imgs, engine_name="rapidocr")
     if success and data:
         combined = "\n\n".join([f"=== {os.path.basename(d['image_path'])} ===\n" + d['full_text'] for d in data])
         start_interactive_ai_chat(combined, os.path.basename(imgs[0]))

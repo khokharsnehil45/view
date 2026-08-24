@@ -1,6 +1,8 @@
 rich>=13.0.0
 click>=8.0.0
 reportlab>=4.0.0
+rapidocr-onnxruntime>=1.2.0
+onnxruntime>=1.15.0
 easyocr>=1.7.0
 pytesseract>=0.3.10
 pillow>=10.0.0
