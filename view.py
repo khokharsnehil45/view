@@ -34,7 +34,7 @@ def print_banner():
     )
     
     banner_panel = Panel(
-        Align.center(banner_ascii),
+        Align.left(banner_ascii),
         border_style="bright_cyan",
         padding=(1, 2),
         subtitle="[bold magenta]v1.1.2[/bold magenta] • [bold cyan]All-in-One CLI Suite[/bold cyan]",
