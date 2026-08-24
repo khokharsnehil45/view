@@ -1,0 +1,10 @@
+rich>=13.0.0
+click>=8.0.0
+reportlab>=4.0.0
+easyocr>=1.7.0
+pytesseract>=0.3.10
+pillow>=10.0.0
+questionary>=2.0.0
+prompt_toolkit>=3.0.0
+pypdf>=4.0.0
+pdf2image>=1.16.0
