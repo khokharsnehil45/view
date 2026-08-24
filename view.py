@@ -30,7 +30,7 @@ def print_banner():
         " ╚████╔╝ ██║███████╗╚███╔███╔╝\n"
         "  ╚═══╝  ╚═╝╚══════╝ ╚══╝╚══╝ \n"
         "[/bold cyan]\n"
-        "[bold magenta]⚡ The All-in-One CLI OCR & PDF Document Suite ⚡[/bold magenta]"
+        "[bold magenta]⚡ The All-in-One Extensible CLI OCR Suite ⚡[/bold magenta]"
     )
     
     banner_panel = Panel(

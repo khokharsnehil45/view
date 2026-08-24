@@ -1,6 +1,6 @@
 # VIEW ⚡
 
-> **The Extensible CLI OCR & PDF Document Suite**
+> **The All-in-One Extensible CLI OCR Suite**
 
 **VIEW** is a terminal CLI and interactive TUI suite styled with high-contrast cyber/neon themes, designed to extract text from single or batch images/screenshots and compile them into clean, structured PDF documents or plain text files.
 
