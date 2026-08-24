@@ -10,6 +10,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.align import Align
+from rich.text import Text
 import questionary
 
 from ocr_engine import OCREngine
@@ -18,26 +20,32 @@ from navigator import interactive_file_navigator, scan_directory
 
 console = Console()
 
-BANNER = r"""[bold cyan]
-██╗   ██╗██╗███████╗██╗    ██╗
-██║   ██║██║██╔════╝██║    ██║
-██║   ██║██║█████╗  ██║ █╗ ██║
-╚██╗ ██╔╝██║██╔══╝  ██║███╗██║
- ╚████╔╝ ██║███████╗╚███╔███╔╝
-  ╚═══╝  ╚═╝╚══════╝ ╚══╝╚══╝ 
-[/bold cyan]
-[bold magenta]⚡ The Extensible CLI OCR & PDF Document Suite ⚡[/bold magenta]
-[dim cyan]─────────────────────────────────────────────────────────────────────────────────[/dim cyan]
-[bold yellow]v1.1.1 • Interactive Navigation & Batch OCR[/bold yellow]
-"""
-
 def print_banner():
-    console.print(BANNER)
+    banner_ascii = (
+        "[bold cyan]"
+        "██╗   ██╗██╗███████╗██╗    ██╗\n"
+        "██║   ██║██║██╔════╝██║    ██║\n"
+        "██║   ██║██║█████╗  ██║ █╗ ██║\n"
+        "╚██╗ ██╔╝██║██╔══╝  ██║███╗██║\n"
+        " ╚████╔╝ ██║███████╗╚███╔███╔╝\n"
+        "  ╚═══╝  ╚═╝╚══════╝ ╚══╝╚══╝ \n"
+        "[/bold cyan]\n"
+        "[bold magenta]⚡ The All-in-One CLI OCR & PDF Document Suite ⚡[/bold magenta]"
+    )
+    
+    banner_panel = Panel(
+        Align.center(banner_ascii),
+        border_style="bright_cyan",
+        padding=(1, 2),
+        subtitle="[bold magenta]v1.1.2[/bold magenta] • [bold cyan]All-in-One CLI Suite[/bold cyan]",
+        subtitle_align="right"
+    )
+    console.print(banner_panel)
 
 def display_menu_panel():
-    menu_desc = "[bold green]🛠️ VIEW Interactive Module Selector[/bold green]\n" \
+    menu_desc = "[bold yellow]🛠️  VIEW Interactive Module Selector[/bold yellow]\n" \
                 "[dim]Browse filesystem visually, extract batch OCR text, and generate structured PDFs.[/dim]"
-    console.print(Panel(menu_desc, border_style="cyan", padding=(0, 1)))
+    console.print(Panel(menu_desc, border_style="yellow", padding=(0, 1)))
 
 def get_image_files(paths: List[str]) -> List[str]:
     valid_exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif"}
@@ -64,7 +72,6 @@ def run_ocr_and_export(
     include_thumbnails: bool = True,
     engine_name: str = "easyocr"
 ):
-    # Filter only existing files
     valid_images = [img for img in image_paths if os.path.isfile(img)]
     
     if not valid_images:
@@ -107,7 +114,6 @@ def run_ocr_and_export(
 
     console.print("\n[bold green]✔ OCR extraction complete![/bold green]")
 
-    # Export to PDF if requested
     if output_pdf:
         console.print(f"[bold cyan]📄 Compiling structured PDF: [bold yellow]{output_pdf}[/bold yellow]...[/bold cyan]")
         builder = PDFDocumentBuilder(title=title)
@@ -130,7 +136,6 @@ def run_ocr_and_export(
             title="[bold green]PDF Generated[/bold green]"
         ))
 
-    # Export to TXT / Markdown if requested
     if output_txt:
         combined_text = []
         for d in extracted_data:
@@ -143,7 +148,6 @@ def run_ocr_and_export(
             f.write("\n".join(combined_text))
         console.print(f"[bold green]✔ Batch text saved to: [cyan]{output_txt}[/cyan][/bold green]")
 
-    # Display preview on terminal
     for item in extracted_data:
         preview = item['full_text'][:350] + "..." if len(item['full_text']) > 350 else item['full_text']
         console.print(Panel(
