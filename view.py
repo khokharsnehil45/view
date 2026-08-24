@@ -3,7 +3,7 @@ import os
 import sys
 import glob
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple, Dict, Any
 
 import click
 from rich.console import Console
@@ -17,6 +17,7 @@ import questionary
 from ocr_engine import OCREngine
 from pdf_builder import PDFDocumentBuilder
 from navigator import interactive_file_navigator, scan_directory
+from ai_analyst import analyze_extracted_text_session, select_or_pull_model
 
 console = Console()
 
@@ -37,14 +38,14 @@ def print_banner():
         Align.left(banner_ascii),
         border_style="bright_cyan",
         padding=(1, 2),
-        subtitle="[bold magenta]v1.1.2[/bold magenta] • [bold cyan]All-in-One CLI Suite[/bold cyan]",
+        subtitle="[bold magenta]v1.2.0[/bold magenta] • [bold cyan]All-in-One CLI Suite[/bold cyan]",
         subtitle_align="right"
     )
     console.print(banner_panel)
 
 def display_menu_panel():
     menu_desc = "[bold yellow]🛠️  VIEW Interactive Module Selector[/bold yellow]\n" \
-                "[dim]Browse filesystem visually, extract batch OCR text, and generate structured PDFs.[/dim]"
+                "[dim]Browse filesystem visually, extract batch OCR, analyze text with local Ollama LLM, and build PDFs.[/dim]"
     console.print(Panel(menu_desc, border_style="yellow", padding=(0, 1)))
 
 def get_image_files(paths: List[str]) -> List[str]:
@@ -71,12 +72,12 @@ def run_ocr_and_export(
     title: str = "Extracted OCR Document",
     include_thumbnails: bool = True,
     engine_name: str = "easyocr"
-):
+) -> Tuple[bool, List[Dict[str, Any]]]:
     valid_images = [img for img in image_paths if os.path.isfile(img)]
     
     if not valid_images:
         console.print("[bold red]❌ No valid image files found to process![/bold red]")
-        return False
+        return False, []
 
     console.print(f"\n[bold cyan]🔍 Batch Queue: {len(valid_images)} image(s) to process.[/bold cyan]\n")
     
@@ -156,9 +157,12 @@ def run_ocr_and_export(
             border_style="cyan"
         ))
 
-    return True
+    return True, extracted_data
 
 def run_interactive_mode():
+    last_extracted_text = ""
+    last_source_label = ""
+
     while True:
         try:
             os.system('clear' if os.name == 'posix' else 'cls')
@@ -166,8 +170,9 @@ def run_interactive_mode():
             display_menu_panel()
 
             choices = [
-                "📂 Browse Files & Extract OCR (Interactive Visual Navigator)",
+                "📂 Browse Files & Extract OCR (Visual Navigator & PDF/TXT)",
                 "⚡ Batch OCR Whole Folder / Directory",
+                "🧠 Local AI Document Analyst (Analyze text via Ollama)",
                 "🖼️  Inspect Directory & List Images",
                 "⚙️  Configure OCR Engine & Preferences",
                 "------------------------------------",
@@ -187,7 +192,48 @@ def run_interactive_mode():
 
             selected_images = []
 
-            if "Browse Files & Extract OCR" in action:
+            if "Local AI Document Analyst" in action:
+                # Option to analyze last extraction, enter text, or pick image(s) to OCR first
+                ai_sources = []
+                if last_extracted_text:
+                    ai_sources.append(f"📄 Use Previously Extracted Text ({last_source_label})")
+                ai_sources.extend([
+                    "🖼️  Select Images to OCR & Analyze (Visual Navigator)",
+                    "📁 Choose Existing TXT / Markdown File",
+                    "✍️  Paste Raw Text Manually",
+                    "⬅️  Back to Main Menu"
+                ])
+                ai_src = questionary.select("Select Source Text for AI Analysis:", choices=ai_sources).ask()
+                
+                if not ai_src or "Back to Main Menu" in ai_src:
+                    continue
+
+                if "Previously Extracted" in ai_src:
+                    analyze_extracted_text_session(last_extracted_text, last_source_label)
+                elif "Select Images" in ai_src:
+                    imgs = interactive_file_navigator()
+                    if imgs:
+                        success, data = run_ocr_and_export(imgs)
+                        if success and data:
+                            combined = "\n\n".join([f"=== {os.path.basename(d['image_path'])} ===\n" + d['full_text'] for d in data])
+                            last_extracted_text = combined
+                            last_source_label = f"{len(data)} image(s)"
+                            analyze_extracted_text_session(combined, last_source_label)
+                elif "Existing TXT" in ai_src:
+                    txt_path = questionary.text("Enter path to text file:").ask()
+                    if txt_path and os.path.isfile(txt_path):
+                        with open(txt_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read()
+                        analyze_extracted_text_session(content, os.path.basename(txt_path))
+                elif "Paste Raw Text" in ai_src:
+                    raw_text = questionary.text("Paste text to analyze:").ask()
+                    if raw_text:
+                        analyze_extracted_text_session(raw_text, "Manual Input")
+                
+                questionary.press_any_key_to_continue("Press any key to return to main menu...").ask()
+                continue
+
+            elif "Browse Files & Extract OCR" in action:
                 selected_images = interactive_file_navigator()
                 if not selected_images:
                     console.print("[yellow]No images selected.[/yellow]")
@@ -251,7 +297,10 @@ def run_interactive_mode():
             elif "Quick Demo" in action:
                 demo_img = "/home/kevin/Pictures/Screenshots/Screenshot From 2026-08-24 15-24-57.png"
                 if os.path.exists(demo_img):
-                    run_ocr_and_export([demo_img], output_pdf="view_demo.pdf", title="VIEW Demo OCR")
+                    success, data = run_ocr_and_export([demo_img], output_pdf="view_demo.pdf", title="VIEW Demo OCR")
+                    if success and data:
+                        last_extracted_text = data[0]['full_text']
+                        last_source_label = os.path.basename(demo_img)
                 else:
                     console.print(f"[yellow]Demo image not found at: {demo_img}[/yellow]")
                 questionary.press_any_key_to_continue("Press any key to return to main menu...").ask()
@@ -291,13 +340,23 @@ def run_interactive_mode():
             if "Text" in export_format or "Both" in export_format:
                 txt_out = questionary.text("Output TXT filename:", default="extracted_text.txt").ask()
 
-            run_ocr_and_export(
+            success, data = run_ocr_and_export(
                 image_paths=selected_images,
                 output_pdf=pdf_out,
                 output_txt=txt_out,
                 title=doc_title,
                 include_thumbnails=inc_thumb
             )
+
+            if success and data:
+                combined = "\n\n".join([f"=== {os.path.basename(d['image_path'])} ===\n" + d['full_text'] for d in data])
+                last_extracted_text = combined
+                last_source_label = f"{len(data)} image(s)"
+
+                # Proactively ask if user wants to run local AI analysis
+                ask_ai = questionary.confirm("🤖 Would you like to analyze this extracted text with Local AI (Ollama)?", default=False).ask()
+                if ask_ai:
+                    analyze_extracted_text_session(last_extracted_text, last_source_label)
 
             questionary.press_any_key_to_continue("\nPress any key to return to main menu...").ask()
         except KeyboardInterrupt:
@@ -311,12 +370,14 @@ def run_interactive_mode():
 @click.option('-t', '--title', default="Structured OCR Document", help="Document title for the PDF header")
 @click.option('--no-thumbnails', is_flag=True, help="Do not include thumbnail images in the generated PDF")
 @click.option('--engine', type=click.Choice(['easyocr', 'tesseract'], case_sensitive=False), default='easyocr', help="OCR engine preference")
+@click.option('--analyze', is_flag=True, help="Launch local AI analyst (Ollama) on extracted text after OCR")
+@click.option('--model', default=None, help="Specific Ollama model name for AI analysis (e.g. llama3.2:3b)")
 @click.option('--interactive', '-m', is_flag=True, help="Launch interactive TUI menu & file navigator")
-def cli(inputs, output, txt, title, no_thumbnails, engine, interactive):
+def cli(inputs, output, txt, title, no_thumbnails, engine, analyze, model, interactive):
     """
     \b
     VIEW - High-Precision Document OCR & PDF Structuring Engine
-    Extract text from multiple images and compile them into a clean, structured PDF or TXT.
+    Extract text from multiple images, analyze with local LLMs (Ollama), and compile into structured PDFs.
     """
     if interactive or (not inputs and len(sys.argv) == 1):
         run_interactive_mode()
@@ -333,10 +394,10 @@ def cli(inputs, output, txt, title, no_thumbnails, engine, interactive):
         console.print(f"[bold red]❌ Error: No valid image files found matching:[/bold red] {inputs}")
         sys.exit(1)
 
-    if not output and not txt:
+    if not output and not txt and not analyze:
         output = "output.pdf"
 
-    success = run_ocr_and_export(
+    success, data = run_ocr_and_export(
         image_paths=images,
         output_pdf=output,
         output_txt=txt,
@@ -346,6 +407,10 @@ def cli(inputs, output, txt, title, no_thumbnails, engine, interactive):
     )
     if not success:
         sys.exit(1)
+
+    if analyze and data:
+        combined = "\n\n".join([f"=== {os.path.basename(d['image_path'])} ===\n" + d['full_text'] for d in data])
+        analyze_extracted_text_session(combined, f"{len(data)} image(s)")
 
 if __name__ == '__main__':
     cli()
