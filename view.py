@@ -18,6 +18,7 @@ from ocr_engine import OCREngine
 from pdf_builder import PDFDocumentBuilder
 from navigator import interactive_file_navigator, scan_directory
 from ai_analyst import analyze_extracted_text_session, start_interactive_ai_chat, select_or_pull_model
+from table_parser import interactive_table_parser_session
 from updater import run_update
 
 console = Console()
@@ -39,14 +40,14 @@ def print_banner():
         Align.left(banner_ascii),
         border_style="bright_cyan",
         padding=(1, 2),
-        subtitle="[bold magenta]v1.5.0[/bold magenta] • [bold cyan]Rapid PP-OCRv4 CPU Engine[/bold cyan]",
+        subtitle="[bold magenta]v1.6.0[/bold magenta] • [bold cyan]Table & Receipt Parser[/bold cyan]",
         subtitle_align="right"
     )
     console.print(banner_panel)
 
 def display_menu_panel():
     menu_desc = "[bold yellow]🛠️  VIEW Interactive Module Selector[/bold yellow]\n" \
-                "[dim]Ultra-fast CPU OCR (PP-OCRv4 ONNX), interactive file navigator, and local Ollama AI chat.[/dim]"
+                "[dim]Rapid PP-OCRv4 ONNX, Visual Navigator, Table/Receipt to CSV/JSON, & Ollama AI Chat.[/dim]"
     console.print(Panel(menu_desc, border_style="yellow", padding=(0, 1)))
 
 def get_image_files(paths: List[str]) -> List[str]:
@@ -173,8 +174,9 @@ def run_interactive_mode():
 
             choices = [
                 "📂 Browse Files & Extract OCR (Visual Navigator & PDF/TXT)",
+                "📊 Table & Receipt Parser (Extract to CSV / JSON / Markdown)",
                 "💬 VIEW AI Chat (Continuous Interactive Chat with Document)",
-                "🧠 Local AI Document Analyst (Summary, Tables, Cleaning)",
+                "🧠 Local AI Document Analyst (Summary, Takeaways & Structuring)",
                 "⚡ Batch OCR Whole Folder / Directory",
                 "🖼️  Inspect Directory & List Images",
                 f"⚙️  Configure OCR Engine (Current: {default_engine.upper()})",
@@ -199,7 +201,47 @@ def run_interactive_mode():
                 questionary.press_any_key_to_continue("Press any key to return to main menu...").ask()
                 continue
 
-            if "Configure OCR Engine" in action:
+            if "Table & Receipt Parser" in action:
+                ai_sources = []
+                if last_extracted_text:
+                    ai_sources.append(f"📄 Parse Previous OCR Text ({last_source_label})")
+                ai_sources.extend([
+                    "🖼️  Select Images to OCR & Parse (Visual Navigator)",
+                    "📁 Choose Existing TXT / Markdown File",
+                    "✍️  Paste Raw Text Manually",
+                    "⬅️  Back to Main Menu"
+                ])
+                ai_src = questionary.select("Select Source Document for Table Extraction:", choices=ai_sources).ask()
+                
+                if not ai_src or "Back to Main Menu" in ai_src:
+                    continue
+
+                if "Previous OCR" in ai_src:
+                    interactive_table_parser_session(last_extracted_text, last_source_label)
+                elif "Select Images" in ai_src:
+                    imgs = interactive_file_navigator()
+                    if imgs:
+                        success, data = run_ocr_and_export(imgs, engine_name=default_engine)
+                        if success and data:
+                            combined = "\n\n".join([f"=== {os.path.basename(d['image_path'])} ===\n" + d['full_text'] for d in data])
+                            last_extracted_text = combined
+                            last_source_label = f"{len(data)} image(s)"
+                            interactive_table_parser_session(combined, last_source_label)
+                elif "Existing TXT" in ai_src:
+                    txt_path = questionary.text("Enter path to text file:").ask()
+                    if txt_path and os.path.isfile(txt_path):
+                        with open(txt_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read()
+                        interactive_table_parser_session(content, os.path.basename(txt_path))
+                elif "Paste Raw Text" in ai_src:
+                    raw_text = questionary.text("Paste text to parse:").ask()
+                    if raw_text:
+                        interactive_table_parser_session(raw_text, "Manual Input")
+
+                questionary.press_any_key_to_continue("Press any key to return to main menu...").ask()
+                continue
+
+            elif "Configure OCR Engine" in action:
                 cfg_choice = questionary.select(
                     "Select Default OCR Engine:",
                     choices=[
@@ -220,7 +262,7 @@ def run_interactive_mode():
                 questionary.press_any_key_to_continue("Press any key to return to main menu...").ask()
                 continue
 
-            if "VIEW AI Chat" in action:
+            elif "VIEW AI Chat" in action:
                 ai_sources = []
                 if last_extracted_text:
                     ai_sources.append(f"📄 Chat about Previous OCR Text ({last_source_label})")
@@ -414,13 +456,16 @@ def run_interactive_mode():
                 post_action = questionary.select(
                     "Next Action with Extracted Text:",
                     choices=[
+                        "📊 Parse Tables / Receipts to CSV & JSON",
                         "💬 Launch Continuous VIEW AI Chat with this document",
                         "🧠 Run AI Document Analysis (Summary, Tables, Cleaning)",
                         "⬅️ Return to Main Menu"
                     ]
                 ).ask()
 
-                if "VIEW AI Chat" in post_action:
+                if "Parse Tables" in post_action:
+                    interactive_table_parser_session(last_extracted_text, last_source_label)
+                elif "VIEW AI Chat" in post_action:
                     start_interactive_ai_chat(last_extracted_text, last_source_label)
                 elif "Run AI Document Analysis" in post_action:
                     analyze_extracted_text_session(last_extracted_text, last_source_label)
@@ -434,18 +479,21 @@ def run_interactive_mode():
 @click.option('-i', '--input', 'inputs', multiple=True, help="Input image file(s), folders, or wildcards")
 @click.option('-o', '--output', default=None, help="Output PDF filepath (e.g. output.pdf)")
 @click.option('--txt', default=None, help="Output TXT filepath (e.g. output.txt)")
+@click.option('--csv', 'csv_out', default=None, help="Output CSV filepath for parsed tables/receipts")
+@click.option('--json', 'json_out', default=None, help="Output JSON filepath for structured data")
 @click.option('-t', '--title', default="Structured OCR Document", help="Document title for the PDF header")
 @click.option('--no-thumbnails', is_flag=True, help="Do not include thumbnail images in the generated PDF")
 @click.option('--engine', type=click.Choice(['rapidocr', 'easyocr', 'tesseract'], case_sensitive=False), default='rapidocr', help="OCR engine: rapidocr (PP-OCRv4 ONNX), easyocr, tesseract")
 @click.option('--analyze', is_flag=True, help="Launch local AI analyst (Ollama) on extracted text after OCR")
 @click.option('--chat', is_flag=True, help="Launch interactive multi-turn AI Chat session with document context")
+@click.option('--parse-table', is_flag=True, help="Launch table & receipt extraction session")
 @click.option('--interactive', '-m', is_flag=True, help="Launch interactive TUI menu & file navigator")
 @click.pass_context
-def cli(ctx, inputs, output, txt, title, no_thumbnails, engine, analyze, chat, interactive):
+def cli(ctx, inputs, output, txt, csv_out, json_out, title, no_thumbnails, engine, analyze, chat, parse_table, interactive):
     """
     \b
     VIEW - High-Precision Document OCR & PDF Structuring Engine
-    Extract text from multiple images, chat with local LLMs (Ollama), and compile into structured PDFs.
+    Extract text from multiple images, extract tables/receipts to CSV/JSON, chat with local LLMs, and compile PDFs.
     """
     if ctx.invoked_subcommand is not None:
         return
@@ -465,7 +513,7 @@ def cli(ctx, inputs, output, txt, title, no_thumbnails, engine, analyze, chat, i
         console.print(f"[bold red]❌ Error: No valid image files found matching:[/bold red] {inputs}")
         sys.exit(1)
 
-    if not output and not txt and not analyze and not chat:
+    if not output and not txt and not analyze and not chat and not parse_table and not csv_out and not json_out:
         output = "output.pdf"
 
     success, data = run_ocr_and_export(
@@ -479,10 +527,12 @@ def cli(ctx, inputs, output, txt, title, no_thumbnails, engine, analyze, chat, i
     if not success:
         sys.exit(1)
 
-    if (analyze or chat) and data:
+    if (analyze or chat or parse_table or csv_out or json_out) and data:
         combined = "\n\n".join([f"=== {os.path.basename(d['image_path'])} ===\n" + d['full_text'] for d in data])
         if chat:
             start_interactive_ai_chat(combined, f"{len(data)} image(s)")
+        elif parse_table or csv_out or json_out:
+            interactive_table_parser_session(combined, f"{len(data)} image(s)")
         else:
             analyze_extracted_text_session(combined, f"{len(data)} image(s)")
 
@@ -505,6 +555,20 @@ def chat_cmd(image_path):
     if success and data:
         combined = "\n\n".join([f"=== {os.path.basename(d['image_path'])} ===\n" + d['full_text'] for d in data])
         start_interactive_ai_chat(combined, os.path.basename(imgs[0]))
+
+@cli.command(name="parse")
+@click.argument('image_path')
+def parse_cmd(image_path):
+    """Extract OCR from an image and launch Table & Receipt CSV/JSON parser."""
+    print_banner()
+    imgs = get_image_files([image_path])
+    if not imgs:
+        console.print(f"[bold red]❌ Image not found:[/bold red] {image_path}")
+        return
+    success, data = run_ocr_and_export(imgs, engine_name="rapidocr")
+    if success and data:
+        combined = "\n\n".join([f"=== {os.path.basename(d['image_path'])} ===\n" + d['full_text'] for d in data])
+        interactive_table_parser_session(combined, os.path.basename(imgs[0]))
 
 if __name__ == '__main__':
     cli()

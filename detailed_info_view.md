@@ -130,3 +130,11 @@ view
   - `/save`: Export complete conversation to formatted Markdown with model tags.
   - `/clear`: Flush conversation memory and keep document context clean.
   - `/exit`: Clean termination back to the terminal.
+
+### 8. 📊 Table & Receipt Parser (`table_parser.py`)
+- Direct command: `view parse <image>` or `view -i <image> --parse-table`
+- Automatically detects and structures:
+  - **Receipts / Invoices**: Extracts merchant, date, currency, line items (qty, unit price, total), tax, subtotal, and grand total.
+  - **Generic Tables / Spreadsheets**: Parses Markdown tables into standard CSV rows & columns.
+  - **Key-Value Forms**: Extracts form metadata into clean JSON schemas.
+- Exports to: `.csv`, `.json`, or full Markdown (`.md`).

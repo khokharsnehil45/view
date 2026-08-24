@@ -77,3 +77,12 @@ In-chat commands:
 - `/save`: Export the entire chat transcript to Markdown (`.md`).
 - `/clear`: Reset conversation context.
 - `/exit`: End the chat session.
+
+### 6. Interactive Table & Receipt Parser (Export to CSV / JSON)
+Automatically extract financial data, invoices, matrices, and tables from images and export to `.csv` or `.json`:
+```bash
+# Launch table/receipt parser on an image:
+view parse "/path/to/receipt.png"
+# or
+view -i "./invoice.png" --parse-table
+```
