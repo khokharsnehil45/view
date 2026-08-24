@@ -65,3 +65,15 @@ Keep VIEW updated to the latest GitHub release:
 view update
 ```
 Or select **`🔄 Check for Updates (Auto-Updater)`** from the interactive menu.
+
+### 5. Continuous Multi-Turn AI Document Chat
+Start an interactive conversation with any document using local Ollama models:
+```bash
+view chat "/path/to/invoice.png"
+# or
+view -i "./notes.png" --chat
+```
+In-chat commands:
+- `/save`: Export the entire chat transcript to Markdown (`.md`).
+- `/clear`: Reset conversation context.
+- `/exit`: End the chat session.

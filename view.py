@@ -17,7 +17,7 @@ import questionary
 from ocr_engine import OCREngine
 from pdf_builder import PDFDocumentBuilder
 from navigator import interactive_file_navigator, scan_directory
-from ai_analyst import analyze_extracted_text_session, select_or_pull_model
+from ai_analyst import analyze_extracted_text_session, start_interactive_ai_chat, select_or_pull_model
 from updater import run_update
 
 console = Console()
@@ -39,14 +39,14 @@ def print_banner():
         Align.left(banner_ascii),
         border_style="bright_cyan",
         padding=(1, 2),
-        subtitle="[bold magenta]v1.3.0[/bold magenta] • [bold cyan]All-in-One CLI Suite[/bold cyan]",
+        subtitle="[bold magenta]v1.4.0[/bold magenta] • [bold cyan]All-in-One CLI Suite[/bold cyan]",
         subtitle_align="right"
     )
     console.print(banner_panel)
 
 def display_menu_panel():
     menu_desc = "[bold yellow]🛠️  VIEW Interactive Module Selector[/bold yellow]\n" \
-                "[dim]Browse filesystem visually, extract batch OCR, analyze text with local Ollama LLM, and build PDFs.[/dim]"
+                "[dim]Browse filesystem visually, extract batch OCR, chat with documents via local Ollama LLM, and build PDFs.[/dim]"
     console.print(Panel(menu_desc, border_style="yellow", padding=(0, 1)))
 
 def get_image_files(paths: List[str]) -> List[str]:
@@ -172,8 +172,9 @@ def run_interactive_mode():
 
             choices = [
                 "📂 Browse Files & Extract OCR (Visual Navigator & PDF/TXT)",
+                "💬 VIEW AI Chat (Continuous Interactive Chat with Document)",
+                "🧠 Local AI Document Analyst (Summary, Takeaways & Structuring)",
                 "⚡ Batch OCR Whole Folder / Directory",
-                "🧠 Local AI Document Analyst (Analyze text via Ollama)",
                 "🖼️  Inspect Directory & List Images",
                 "⚙️  Configure OCR Engine & Preferences",
                 "🔄 Check for Updates (Auto-Updater)",
@@ -197,9 +198,47 @@ def run_interactive_mode():
                 questionary.press_any_key_to_continue("Press any key to return to main menu...").ask()
                 continue
 
-            selected_images = []
+            if "VIEW AI Chat" in action:
+                ai_sources = []
+                if last_extracted_text:
+                    ai_sources.append(f"📄 Chat about Previous OCR Text ({last_source_label})")
+                ai_sources.extend([
+                    "🖼️  Select Images to OCR & Chat (Visual Navigator)",
+                    "📁 Choose Existing TXT / Markdown File",
+                    "✍️  Paste Raw Text Manually",
+                    "⬅️  Back to Main Menu"
+                ])
+                ai_src = questionary.select("Select Source Document for AI Chat:", choices=ai_sources).ask()
+                
+                if not ai_src or "Back to Main Menu" in ai_src:
+                    continue
 
-            if "Local AI Document Analyst" in action:
+                if "Previous OCR" in ai_src:
+                    start_interactive_ai_chat(last_extracted_text, last_source_label)
+                elif "Select Images" in ai_src:
+                    imgs = interactive_file_navigator()
+                    if imgs:
+                        success, data = run_ocr_and_export(imgs)
+                        if success and data:
+                            combined = "\n\n".join([f"=== {os.path.basename(d['image_path'])} ===\n" + d['full_text'] for d in data])
+                            last_extracted_text = combined
+                            last_source_label = f"{len(data)} image(s)"
+                            start_interactive_ai_chat(combined, last_source_label)
+                elif "Existing TXT" in ai_src:
+                    txt_path = questionary.text("Enter path to text file:").ask()
+                    if txt_path and os.path.isfile(txt_path):
+                        with open(txt_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read()
+                        start_interactive_ai_chat(content, os.path.basename(txt_path))
+                elif "Paste Raw Text" in ai_src:
+                    raw_text = questionary.text("Paste text to chat with:").ask()
+                    if raw_text:
+                        start_interactive_ai_chat(raw_text, "Manual Input")
+
+                questionary.press_any_key_to_continue("Press any key to return to main menu...").ask()
+                continue
+
+            elif "Local AI Document Analyst" in action:
                 ai_sources = []
                 if last_extracted_text:
                     ai_sources.append(f"📄 Use Previously Extracted Text ({last_source_label})")
@@ -359,8 +398,19 @@ def run_interactive_mode():
                 last_extracted_text = combined
                 last_source_label = f"{len(data)} image(s)"
 
-                ask_ai = questionary.confirm("🤖 Would you like to analyze this extracted text with Local AI (Ollama)?", default=False).ask()
-                if ask_ai:
+                # Direct prompt to chat or analyze with AI
+                post_action = questionary.select(
+                    "Next Action with Extracted Text:",
+                    choices=[
+                        "💬 Launch Continuous VIEW AI Chat with this document",
+                        "🧠 Run AI Document Analysis (Summary, Tables, Cleaning)",
+                        "⬅️ Return to Main Menu"
+                    ]
+                ).ask()
+
+                if "VIEW AI Chat" in post_action:
+                    start_interactive_ai_chat(last_extracted_text, last_source_label)
+                elif "Run AI Document Analysis" in post_action:
                     analyze_extracted_text_session(last_extracted_text, last_source_label)
 
             questionary.press_any_key_to_continue("\nPress any key to return to main menu...").ask()
@@ -376,13 +426,14 @@ def run_interactive_mode():
 @click.option('--no-thumbnails', is_flag=True, help="Do not include thumbnail images in the generated PDF")
 @click.option('--engine', type=click.Choice(['easyocr', 'tesseract'], case_sensitive=False), default='easyocr', help="OCR engine preference")
 @click.option('--analyze', is_flag=True, help="Launch local AI analyst (Ollama) on extracted text after OCR")
+@click.option('--chat', is_flag=True, help="Launch interactive multi-turn AI Chat session with document context")
 @click.option('--interactive', '-m', is_flag=True, help="Launch interactive TUI menu & file navigator")
 @click.pass_context
-def cli(ctx, inputs, output, txt, title, no_thumbnails, engine, analyze, interactive):
+def cli(ctx, inputs, output, txt, title, no_thumbnails, engine, analyze, chat, interactive):
     """
     \b
     VIEW - High-Precision Document OCR & PDF Structuring Engine
-    Extract text from multiple images, analyze with local LLMs (Ollama), and compile into structured PDFs.
+    Extract text from multiple images, chat with local LLMs (Ollama), and compile into structured PDFs.
     """
     if ctx.invoked_subcommand is not None:
         return
@@ -402,7 +453,7 @@ def cli(ctx, inputs, output, txt, title, no_thumbnails, engine, analyze, interac
         console.print(f"[bold red]❌ Error: No valid image files found matching:[/bold red] {inputs}")
         sys.exit(1)
 
-    if not output and not txt and not analyze:
+    if not output and not txt and not analyze and not chat:
         output = "output.pdf"
 
     success, data = run_ocr_and_export(
@@ -416,15 +467,32 @@ def cli(ctx, inputs, output, txt, title, no_thumbnails, engine, analyze, interac
     if not success:
         sys.exit(1)
 
-    if analyze and data:
+    if (analyze or chat) and data:
         combined = "\n\n".join([f"=== {os.path.basename(d['image_path'])} ===\n" + d['full_text'] for d in data])
-        analyze_extracted_text_session(combined, f"{len(data)} image(s)")
+        if chat:
+            start_interactive_ai_chat(combined, f"{len(data)} image(s)")
+        else:
+            analyze_extracted_text_session(combined, f"{len(data)} image(s)")
 
 @cli.command(name="update")
 def update_cmd():
     """Check for updates and pull the latest version from GitHub."""
     print_banner()
     run_update()
+
+@cli.command(name="chat")
+@click.argument('image_path')
+def chat_cmd(image_path):
+    """Extract OCR from an image and start continuous AI Chat session immediately."""
+    print_banner()
+    imgs = get_image_files([image_path])
+    if not imgs:
+        console.print(f"[bold red]❌ Image not found:[/bold red] {image_path}")
+        return
+    success, data = run_ocr_and_export(imgs)
+    if success and data:
+        combined = "\n\n".join([f"=== {os.path.basename(d['image_path'])} ===\n" + d['full_text'] for d in data])
+        start_interactive_ai_chat(combined, os.path.basename(imgs[0]))
 
 if __name__ == '__main__':
     cli()

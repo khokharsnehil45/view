@@ -9,6 +9,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import InMemoryHistory
 import questionary
 
 console = Console()
@@ -24,7 +26,6 @@ def get_installed_ollama_models() -> List[str]:
             models = [m.get("name") for m in data.get("models", []) if m.get("name")]
             return models
     except Exception:
-        # Fallback to CLI command
         try:
             res = subprocess.run(["ollama", "list"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             if res.returncode == 0:
@@ -122,13 +123,12 @@ def select_or_pull_model() -> Optional[str]:
 
     return selected
 
-def query_ollama(model: str, system_prompt: str, user_prompt: str) -> Optional[str]:
-    """Send prompt to local Ollama API."""
-    url = f"{OLLAMA_API_BASE}/api/generate"
+def query_ollama_chat(model: str, messages: List[Dict[str, str]]) -> Optional[str]:
+    """Send conversation messages to local Ollama chat API."""
+    url = f"{OLLAMA_API_BASE}/api/chat"
     payload = {
         "model": model,
-        "system": system_prompt,
-        "prompt": user_prompt,
+        "messages": messages,
         "stream": False
     }
     
@@ -140,15 +140,102 @@ def query_ollama(model: str, system_prompt: str, user_prompt: str) -> Optional[s
             headers={'Content-Type': 'application/json'},
             method='POST'
         )
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=180) as resp:
             res_json = json.loads(resp.read().decode('utf-8'))
-            return res_json.get("response", "")
+            msg = res_json.get("message", {})
+            return msg.get("content", "")
     except urllib.error.URLError as e:
-        console.print(f"[bold red]❌ Failed to connect to Ollama ({e}). Make sure 'ollama serve' or Ollama daemon is running.[/bold red]")
+        console.print(f"[bold red]❌ Failed to connect to Ollama ({e}). Make sure Ollama is running.[/bold red]")
         return None
     except Exception as e:
-        console.print(f"[bold red]❌ Error during Ollama inference: {e}[/bold red]")
+        console.print(f"[bold red]❌ Error during Ollama chat: {e}[/bold red]")
         return None
+
+def start_interactive_ai_chat(extracted_text: str, source_name: str = "Extracted Document", model: Optional[str] = None):
+    """Continuous multi-turn conversational REPL with the extracted document."""
+    if not model:
+        model = select_or_pull_model()
+        if not model:
+            return
+
+    console.print(Panel(
+        f"[bold cyan]Document Context:[/bold cyan] [yellow]{source_name}[/yellow] ([green]{len(extracted_text)} chars[/green])\n"
+        f"[bold cyan]Model:[/bold cyan] [magenta]{model}[/magenta]\n\n"
+        "[dim]Commands: Type your question, or enter [bold yellow]/save[/bold yellow] (export chat), [bold yellow]/clear[/bold yellow] (reset chat), or [bold red]/exit[/bold red] (quit chat).[/dim]",
+        title="[bold magenta]💬 VIEW AI Document Chat (Interactive REPL)[/bold magenta]",
+        border_style="magenta"
+    ))
+
+    system_content = (
+        "You are an expert AI Document Intelligence assistant. You are conversing with the user about a document "
+        "whose text was extracted via OCR. Answer questions accurately based on this document context.\n\n"
+        f"--- START OF DOCUMENT CONTEXT ({source_name}) ---\n"
+        f"{extracted_text}\n"
+        "--- END OF DOCUMENT CONTEXT ---"
+    )
+
+    messages = [
+        {"role": "system", "content": system_content}
+    ]
+
+    session = PromptSession(history=InMemoryHistory())
+
+    while True:
+        try:
+            user_input = session.prompt("\n💬 Ask VIEW AI > ").strip()
+
+            if not user_input:
+                continue
+
+            if user_input.lower() in ("/exit", "/quit", "exit", "quit", ":q"):
+                console.print("[yellow]Ending AI Chat session...[/yellow]")
+                break
+
+            if user_input.lower() == "/clear":
+                messages = [{"role": "system", "content": system_content}]
+                console.print("[bold yellow]🧹 Chat history cleared![/bold yellow]")
+                continue
+
+            if user_input.lower() == "/save":
+                export_fn = f"chat_history_{source_name.replace(' ', '_').lower()}.md"
+                with open(export_fn, 'w', encoding='utf-8') as f:
+                    f.write(f"# VIEW AI Chat History: {source_name}\n**Model:** `{model}`\n\n---\n\n")
+                    for m in messages:
+                        if m['role'] == 'user':
+                            f.write(f"### 👤 User:\n{m['content']}\n\n")
+                        elif m['role'] == 'assistant':
+                            f.write(f"### 🤖 VIEW AI ({model}):\n{m['content']}\n\n---\n\n")
+                console.print(f"[bold green]✔ Chat history exported to: [cyan]{export_fn}[/cyan][/bold green]")
+                continue
+
+            messages.append({"role": "user", "content": user_input})
+
+            with Progress(
+                SpinnerColumn(style="bold magenta"),
+                TextColumn(f"[bold cyan]Thinking ({model})..."),
+                console=console
+            ) as progress:
+                t = progress.add_task("chat", total=None)
+                assistant_reply = query_ollama_chat(model=model, messages=messages)
+
+            if assistant_reply:
+                messages.append({"role": "assistant", "content": assistant_reply})
+                console.print()
+                console.print(Panel(
+                    Markdown(assistant_reply),
+                    title=f"[bold cyan]🤖 VIEW AI ({model})[/bold cyan]",
+                    border_style="bright_cyan",
+                    padding=(1, 2)
+                ))
+            else:
+                # Remove unanswered question from history
+                messages.pop()
+
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Chat cancelled by user.[/yellow]")
+            break
+        except EOFError:
+            break
 
 def analyze_extracted_text_session(extracted_text: str, source_name: str = "Extracted Document"):
     """Interactive AI Analyst session for extracted OCR text."""
@@ -169,19 +256,14 @@ def analyze_extracted_text_session(extracted_text: str, source_name: str = "Extr
 
     console.print(f"\n[bold green]✔ Active Model: [bold cyan]{model}[/bold cyan][/bold green]\n")
 
-    system_prompt = (
-        "You are an expert AI Document Analyst. You analyze text extracted from OCR images and scans. "
-        "Provide clear, structured, well-formatted answers in GitHub-style Markdown."
-    )
-
     while True:
         task_choices = [
+            "💬 Start Continuous Multi-Turn AI Chat (REPL)",
             "📋 Comprehensive Document Summary",
             "🔑 Key Takeaways & Action Items Extractor",
             "📊 Structured Data / Table Reconstructor (Markdown format)",
             "🧹 Clean Up OCR Typos & Fix Grammar",
-            "❓ Ask Custom Question / Freeform Chat about this Text",
-            "💾 Export Analysis to Markdown / TXT",
+            "❓ Single Question / Quick Query",
             "⬅️  Return to Main Menu"
         ]
 
@@ -193,6 +275,10 @@ def analyze_extracted_text_session(extracted_text: str, source_name: str = "Extr
 
         if not action or "Return to Main Menu" in action:
             break
+
+        if "Start Continuous Multi-Turn AI Chat" in action:
+            start_interactive_ai_chat(extracted_text, source_name, model=model)
+            continue
 
         user_prompt = ""
         task_title = ""
@@ -213,21 +299,30 @@ def analyze_extracted_text_session(extracted_text: str, source_name: str = "Extr
             task_title = "Cleaned & Corrected Text"
             user_prompt = f"Proofread and reconstruct this raw OCR text. Fix OCR spelling glitches, broken words, line wraps, and formatting while preserving original meaning:\n\n{extracted_text}"
 
-        elif "Ask Custom Question" in action:
-            custom_q = questionary.text("Enter your question or prompt about this document:").ask()
+        elif "Single Question" in action:
+            custom_q = questionary.text("Enter your question about this document:").ask()
             if not custom_q:
                 continue
             task_title = f"Q&A: {custom_q[:40]}"
             user_prompt = f"Based on the following document context:\n\n{extracted_text}\n\nAnswer this question: {custom_q}"
 
         if user_prompt:
+            system_prompt = (
+                "You are an expert AI Document Analyst. You analyze text extracted from OCR images and scans. "
+                "Provide clear, structured, well-formatted answers in GitHub-style Markdown."
+            )
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
+
             with Progress(
                 SpinnerColumn(style="bold magenta"),
-                TextColumn("[bold cyan]Analyzing with {task.fields[model]}..."),
+                TextColumn(f"[bold cyan]Analyzing with {model}..."),
                 console=console
             ) as progress:
-                t = progress.add_task("analyst", total=None, model=model)
-                response = query_ollama(model=model, system_prompt=system_prompt, user_prompt=user_prompt)
+                t = progress.add_task("analyst", total=None)
+                response = query_ollama_chat(model=model, messages=messages)
 
             if response:
                 console.print()

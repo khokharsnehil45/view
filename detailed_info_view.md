@@ -121,3 +121,12 @@ view
 - Interactively checks GitHub remote for incoming commits (`git fetch` & `git rev-list`).
 - Automatically pulls latest updates (`git pull origin main`).
 - Upgrades python dependencies if `requirements.txt` was modified.
+
+### 7. 💬 Continuous Multi-Turn AI Document Chat (`ai_analyst.py`)
+- Direct command: `view chat <image>` or `view -i <image> --chat`
+- Multi-turn conversation engine leveraging Ollama's `/api/chat` endpoint.
+- Full context retention: Preserves conversation history between turns.
+- In-Chat Commands:
+  - `/save`: Export complete conversation to formatted Markdown with model tags.
+  - `/clear`: Flush conversation memory and keep document context clean.
+  - `/exit`: Clean termination back to the terminal.
